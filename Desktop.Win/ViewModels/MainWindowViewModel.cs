@@ -26,7 +26,8 @@ namespace Remotely.Desktop.Win.ViewModels
         private readonly IConfigService _configService;
         private readonly ICursorIconWatcher _cursorIconWatcher;
         private string _host;
-        private string _sessionID;
+        private string _sessionId;
+        private string _statusMessage;
 
         public MainWindowViewModel()
         {
@@ -47,7 +48,6 @@ namespace Remotely.Desktop.Win.ViewModels
 
             Services.GetRequiredService<IClipboardService>().BeginWatching();
             Services.GetRequiredService<IKeyboardMouseInput>().Init();
-            _conductor.SessionIDChanged += SessionIDChanged;
             _conductor.ViewerRemoved += ViewerRemoved;
             _conductor.ViewerAdded += ViewerAdded;
             _conductor.ScreenCastRequested += ScreenCastRequested;
@@ -166,13 +166,12 @@ namespace Remotely.Desktop.Win.ViewModels
             }
 
         }
-
-        public string SessionID
+        public string StatusMessage
         {
-            get => _sessionID;
+            get => _statusMessage;
             set
             {
-                _sessionID = value;
+                _statusMessage = value;
                 FirePropertyChanged();
             }
         }
@@ -181,18 +180,30 @@ namespace Remotely.Desktop.Win.ViewModels
 
         public void CopyLink()
         {
-            Clipboard.SetText($"{Host}/RemoteControl?sessionID={SessionID?.Replace(" ", "")}");
+            Clipboard.SetText($"{Host}/RemoteControl?sessionID={StatusMessage?.Replace(" ", "")}");
         }
 
         public async Task GetSessionID()
         {
             await _casterSocket.SendDeviceInfo(_conductor.ServiceID, Environment.MachineName, _conductor.DeviceID);
-            await _casterSocket.GetSessionID();
+            var sessionId = await _casterSocket.GetSessionID();
+
+            var formattedSessionID = "";
+            for (var i = 0; i < sessionId.Length; i += 3)
+            {
+                formattedSessionID += sessionId.Substring(i, 3) + " ";
+            }
+
+            App.Current?.Dispatcher?.Invoke(() =>
+            {
+                _sessionId = formattedSessionID.Trim();
+                StatusMessage = _sessionId;
+            });
         }
 
         public async Task Init()
         {
-            SessionID = "Retrieving...";
+            StatusMessage = "Retrieving...";
 
             Host = _configService.GetConfig().Host;
 
@@ -206,48 +217,52 @@ namespace Remotely.Desktop.Win.ViewModels
 
             try
             {
-                await _casterSocket.Connect(_conductor.Host);
+                var result = await _casterSocket.Connect(_conductor.Host);
 
-                if (_casterSocket.Connection is null)
+                if (result)
                 {
+                    _casterSocket.Connection.Closed += (ex) =>
+                    {
+                        App.Current?.Dispatcher?.Invoke(() =>
+                        {
+                            Viewers.Clear();
+                            StatusMessage = "Disconnected";
+                        });
+                        return Task.CompletedTask;
+                    };
+
+                    _casterSocket.Connection.Reconnecting += (ex) =>
+                    {
+                        App.Current?.Dispatcher?.Invoke(() =>
+                        {
+                            Viewers.Clear();
+                            StatusMessage = "Reconnecting";
+                        });
+                        return Task.CompletedTask;
+                    };
+
+                    _casterSocket.Connection.Reconnected += (id) =>
+                    {
+                        StatusMessage = _sessionId;
+                        return Task.CompletedTask;
+                    };
+
+                    await DeviceInitService.GetInitParams();
+                    ApplyBranding();
+
+                    await GetSessionID();
+
                     return;
                 }
-
-                _casterSocket.Connection.Closed += async (ex) =>
-                {
-                    await App.Current?.Dispatcher?.InvokeAsync(() =>
-                    {
-                        Viewers.Clear();
-                        SessionID = "Disconnected";
-                    });
-                };
-
-                _casterSocket.Connection.Reconnecting += async (ex) =>
-                {
-                    await App.Current?.Dispatcher?.InvokeAsync(() =>
-                    {
-                        Viewers.Clear();
-                        SessionID = "Reconnecting";
-                    });
-                };
-
-                _casterSocket.Connection.Reconnected += async (arg) =>
-                {
-                    await GetSessionID();
-                };
-
-                await DeviceInitService.GetInitParams();
-                ApplyBranding();
-
-                await GetSessionID();
             }
             catch (Exception ex)
             {
                 Logger.Write(ex);
-                SessionID = "Failed";
-                MessageBox.Show(Application.Current.MainWindow, "Failed to connect to server.", "Connection Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
             }
+
+            // If we got here, something went wrong.
+            StatusMessage = "Failed";
+            MessageBox.Show(Application.Current.MainWindow, "Failed to connect to server.", "Connection Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         public void PromptForHostName()
@@ -300,37 +315,21 @@ namespace Remotely.Desktop.Win.ViewModels
             }
         }
 
-        private void ScreenCastRequested(object sender, ScreenCastRequest screenCastRequest)
+        private async void ScreenCastRequested(object sender, ScreenCastRequest screenCastRequest)
         {
-            App.Current.Dispatcher.Invoke(() =>
+            await App.Current.Dispatcher.InvokeAsync(async () =>
             {
                 App.Current.MainWindow.Activate();
                 var result = MessageBox.Show(Application.Current.MainWindow, $"You've received a connection request from {screenCastRequest.RequesterName}.  Accept?", "Connection Request", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (result == MessageBoxResult.Yes)
                 {
-                    Task.Run(() =>
-                    {
-                        Services.GetRequiredService<IScreenCaster>().BeginScreenCasting(screenCastRequest);
-                    });
+                    Services.GetRequiredService<IScreenCaster>().BeginScreenCasting(screenCastRequest);
                 }
                 else
                 {
-                    // Run on another thread so it doesn't tie up the UI thread.
-                    Task.Run(async () =>
-                    {
-                        await _casterSocket.SendConnectionRequestDenied(screenCastRequest.ViewerID);
-                    });
+                    await _casterSocket.SendConnectionRequestDenied(screenCastRequest.ViewerID);
                 }
             });
-        }
-        private void SessionIDChanged(object sender, string sessionID)
-        {
-            var formattedSessionID = "";
-            for (var i = 0; i < sessionID.Length; i += 3)
-            {
-                formattedSessionID += sessionID.Substring(i, 3) + " ";
-            }
-            SessionID = formattedSessionID.Trim();
         }
 
         private void ViewerAdded(object sender, Viewer viewer)

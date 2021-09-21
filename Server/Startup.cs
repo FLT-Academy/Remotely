@@ -158,7 +158,7 @@ namespace Remotely.Server
             services.AddSignalR(options =>
             {
                 options.EnableDetailedErrors = IsDev;
-                options.MaximumReceiveMessageSize = 500_000;
+                options.MaximumReceiveMessageSize = 100_000;
             })
                 .AddJsonProtocol(options =>
                 {
@@ -242,21 +242,9 @@ namespace Remotely.Server
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapHub<AgentHub>("/AgentHub", options =>
-                {
-                    options.ApplicationMaxBufferSize = 500_000;
-                    options.TransportMaxBufferSize = 500_000;
-                });
-                endpoints.MapHub<CasterHub>("/CasterHub", options =>
-                {
-                    options.ApplicationMaxBufferSize = 100_000;
-                    options.TransportMaxBufferSize = 100_000;
-                });
-                endpoints.MapHub<ViewerHub>("/ViewerHub", options =>
-                {
-                    options.ApplicationMaxBufferSize = 100_000;
-                    options.TransportMaxBufferSize = 100_000;
-                });
+                endpoints.MapHub<AgentHub>("/AgentHub");
+                endpoints.MapHub<CasterHub>("/CasterHub");
+                endpoints.MapHub<ViewerHub>("/ViewerHub");
 
                 endpoints.MapControllers();
                 endpoints.MapBlazorHub();
@@ -276,21 +264,6 @@ namespace Remotely.Server
 
         private static void ConfigureStaticFiles(IApplicationBuilder app, IWebHostEnvironment env)
         {
-            // TODO: This redirects downloads from the old location to the new one.
-            // Remove after a few releases.
-            app.Use(async (context, next) =>
-            {
-                if (context.Request.Path.HasValue &&
-                    context.Request.Path.Value.Contains("/Downloads/", StringComparison.OrdinalIgnoreCase) &&
-                    !context.Request.Path.Value.TrimEnd('/').EndsWith("downloads", StringComparison.OrdinalIgnoreCase))
-                {
-                    var redirectUrl = context.Request.GetDisplayUrl().Replace("/Downloads/", "/Content/");
-                    context.Response.Redirect(redirectUrl);
-                    return;
-                }
-                await next();
-            });
-
             var provider = new FileExtensionContentTypeProvider();
             // Add new mappings
             provider.Mappings[".ps1"] = "application/octet-stream";

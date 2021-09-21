@@ -14,7 +14,7 @@ var signalR = window["signalR"];
 
 export class ViewerHubConnection {
     Connection: HubConnection;
-    MessagePack: any = window['MessagePack'];
+    MessagePack: any = window['msgpack5']();
     PartialCaptureFrames: Uint8Array[] = [];
 
  
@@ -29,7 +29,6 @@ export class ViewerHubConnection {
 
         this.Connection.start().then(() => {
             this.SendScreenCastRequestToDevice();
-            UI.ToggleConnectUI(false);
         }).catch(err => {
             console.error(err.toString());
             console.log("Connection closed.");

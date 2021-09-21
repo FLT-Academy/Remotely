@@ -5,7 +5,7 @@ import { ShowMessage } from "./UI.js";
 var signalR = window["signalR"];
 export class ViewerHubConnection {
     constructor() {
-        this.MessagePack = window['MessagePack'];
+        this.MessagePack = window['msgpack5']();
         this.PartialCaptureFrames = [];
     }
     Connect() {
@@ -17,7 +17,6 @@ export class ViewerHubConnection {
         this.ApplyMessageHandlers(this.Connection);
         this.Connection.start().then(() => {
             this.SendScreenCastRequestToDevice();
-            UI.ToggleConnectUI(false);
         }).catch(err => {
             console.error(err.toString());
             console.log("Connection closed.");
